@@ -49,9 +49,6 @@ class Embed:
             "url": e.ctftime_url,
             "description": self._truncate(self._clean_desc(e.description), 400),
             "color": self._color(e.weight),
-            # 레이어 분리: 라벨=한글(읽는 사람 언어), 값=CTFtime 원문(Jeopardy/Open/Onsite).
-            # 이모지는 정보를 안 더하는 장식이라 제거 — 색 막대+로고가 시각 앵커.
-            # <t:..:R> 상대시간은 디스코드가 보는 사람 로캘로 자동 변환("5일 후"/"in 5 days").
             "fields": [
                 {"name": "시작", "value": f"<t:{e.start_ts}:F>\n<t:{e.start_ts}:R>", "inline": True},
                 {"name": "기간", "value": e.duration_text, "inline": True},

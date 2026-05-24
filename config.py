@@ -1,7 +1,7 @@
 import os
 
 CTFTIME_API = "https://ctftime.org/api/v1/events/"
-WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "https://discord.com/api/webhooks/1508146997574631624/DcYQToiJs6V4a8K53bq1gBPPlxrgUPqTsbspOBoimdB3BYS9f9rgnZhIXnND1hKUF3Jq")
+WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 USER_AGENT  = "ctf-notifier/1.0 (contact: jjh4450git@gamil.com)"
 DAYS_AHEAD  = int(os.environ.get("DAYS_AHEAD", "7"))
 MAX_EVENTS  = int(os.environ.get("MAX_EVENTS", "20"))

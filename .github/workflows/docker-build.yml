@@ -1,0 +1,131 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/docker-build.yml'
+  schedule:
+    # 매주 월요일 00:00 UTC에 트리거하지만, schedule-gate에서 ISO 주차가 3의 배수인 주만 통과시킴 (≈3주 간격)
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  schedule-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      proceed: ${{ steps.check.outputs.proceed }}
+    steps:
+      - id: check
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          WEEK=$(date -u +%V)
+          if [ $((10#$WEEK % 3)) -eq 0 ]; then
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            echo "ISO week $WEEK is not a 3-week mark; skipping scheduled build."
+          fi
+
+  build:
+    needs: schedule-gate
+    if: needs.schedule-gate.outputs.proceed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate version
+        id: version
+        run: |
+          VERSION="v$(date +'%Y.%m.%d')-$(git rev-parse --short HEAD)"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            ${{ github.event_name == 'push' && 'type=raw,value=latest' || '' }}
+            ${{ github.event_name == 'schedule' && 'type=raw,value=triweekly' || '' }}
+
+      - name: Build and push image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            APP_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+          sbom: false
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if gh release view "$VERSION" &>/dev/null; then
+            exit 0
+          fi
+
+          gh release create "$VERSION" \
+            --generate-notes \
+            --title "Release $VERSION" \
+            --notes "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$VERSION"
